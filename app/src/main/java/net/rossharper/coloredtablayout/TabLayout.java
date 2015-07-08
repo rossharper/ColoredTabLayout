@@ -14,26 +14,25 @@
  * limitations under the License.
  */
 
-package android.support.design.widget;
+package net.rossharper.coloredtablayout;
 
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.content.res.TypedArray;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.support.annotation.IntDef;
-import android.support.design.R;
-import android.support.v4.view.GravityCompat;
 import android.support.v4.view.PagerAdapter;
 import android.support.v4.view.ViewCompat;
 import android.support.v4.view.ViewPager;
 import android.support.v4.view.animation.FastOutSlowInInterpolator;
 import android.support.v7.app.ActionBar;
-import android.support.v7.internal.widget.CompatTextView;
 import android.support.v7.internal.widget.TintManager;
+import android.support.v7.widget.AppCompatTextView;
 import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.view.Gravity;
@@ -118,6 +117,8 @@ public class TabLayout extends HorizontalScrollView {
      * @see #getTabMode()
      */
     public static final int MODE_FIXED = 1;
+    private final int mDefaultIndicatorColor;
+    private TabStyleDelegate mTabStyleDelegate;
 
     /**
      * @hide
@@ -232,7 +233,8 @@ public class TabLayout extends HorizontalScrollView {
 
         mTabStrip.setSelectedIndicatorHeight(
                 a.getDimensionPixelSize(R.styleable.TabLayout_tabIndicatorHeight, 0));
-        mTabStrip.setSelectedIndicatorColor(a.getColor(R.styleable.TabLayout_tabIndicatorColor, 0));
+        mDefaultIndicatorColor = a.getColor(R.styleable.TabLayout_tabIndicatorColor, 0);
+        mTabStrip.setSelectedIndicatorColor(mDefaultIndicatorColor);
 
         mTabTextAppearance = a.getResourceId(R.styleable.TabLayout_tabTextAppearance,
                 R.style.TextAppearance_Design_Tab);
@@ -263,6 +265,10 @@ public class TabLayout extends HorizontalScrollView {
 
         // Now apply the tab mode and gravity
         applyModeAndGravity();
+    }
+
+    public void setTabStyleDelegate(TabStyleDelegate tabStyleDelegate) {
+        mTabStyleDelegate = tabStyleDelegate;
     }
 
     /**
@@ -313,7 +319,7 @@ public class TabLayout extends HorizontalScrollView {
 
             @Override
             public void onPageScrolled(int position, float positionOffset,
-                    int positionOffsetPixels) {
+                                       int positionOffsetPixels) {
                 setScrollPosition(position, positionOffset);
             }
 
@@ -778,14 +784,7 @@ public class TabLayout extends HorizontalScrollView {
         }
         ViewCompat.setPaddingRelative(mTabStrip, paddingStart, 0, 0, 0);
 
-        switch (mMode) {
-            case MODE_FIXED:
-                mTabStrip.setGravity(Gravity.CENTER_HORIZONTAL);
-                break;
-            case MODE_SCROLLABLE:
-                mTabStrip.setGravity(GravityCompat.START);
-                break;
-        }
+        mTabStrip.setGravity(Gravity.CENTER_HORIZONTAL);
 
         updateTabViewsLayoutParams();
     }
@@ -1116,7 +1115,7 @@ public class TabLayout extends HorizontalScrollView {
                 final boolean hasText = !TextUtils.isEmpty(text);
                 if (hasText) {
                     if (mTextView == null) {
-                        CompatTextView textView = new CompatTextView(getContext());
+                        AppCompatTextView textView = new AppCompatTextView(getContext());
                         textView.setTextAppearance(getContext(), mTabTextAppearance);
                         textView.setMaxLines(MAX_TAB_TEXT_LINES);
                         textView.setEllipsize(TextUtils.TruncateAt.END);
@@ -1221,7 +1220,7 @@ public class TabLayout extends HorizontalScrollView {
             if (isAnimationRunning(getAnimation())) {
                 return;
             }
-            mSelectedPosition = position;
+            updateSelectedPosition(position);
             mSelectionOffset = positionOffset;
             updateIndicatorPosition();
         }
@@ -1296,12 +1295,14 @@ public class TabLayout extends HorizontalScrollView {
                 right = selectedTitle.getRight();
 
                 if (mSelectionOffset > 0f && mSelectedPosition < getChildCount() - 1) {
+
+
                     // Draw the selection partway between the tabs
                     View nextTitle = getChildAt(mSelectedPosition + 1);
-                    left = (int) (mSelectionOffset * nextTitle.getLeft() +
-                            (1.0f - mSelectionOffset) * left);
-                    right = (int) (mSelectionOffset * nextTitle.getRight() +
-                            (1.0f - mSelectionOffset) * right);
+                    left = (int) (mSelectionOffset * nextTitle.getLeft() + (1.0f - mSelectionOffset) * left);
+                    right = (int) (mSelectionOffset * nextTitle.getRight() + (1.0f - mSelectionOffset) * right);
+
+                    setSelectedIndicatorColor(lerpColor(colorForIndicatorAtPosition(mSelectedPosition), colorForIndicatorAtPosition(mSelectedPosition + 1), mSelectionOffset));
                 }
             } else {
                 left = right = -1;
@@ -1328,6 +1329,9 @@ public class TabLayout extends HorizontalScrollView {
             final int targetRight = targetView.getRight();
             final int startLeft;
             final int startRight;
+
+            final int startColor = mSelectedIndicatorPaint.getColor();
+            final int endColor = colorForIndicatorAtPosition(position);
 
             if (Math.abs(position - mSelectedPosition) <= 1) {
                 // If the views are adjacent, we'll animate from edge-to-edge
@@ -1360,6 +1364,7 @@ public class TabLayout extends HorizontalScrollView {
                         setIndicatorPosition(
                                 (int) lerp(startLeft, targetLeft, interpolatedTime),
                                 (int) lerp(startRight, targetRight, interpolatedTime));
+                        setSelectedIndicatorColor((int)lerpColor(startColor, endColor, interpolatedTime));
                     }
                 };
                 anim.setInterpolator(INTERPOLATOR);
@@ -1371,7 +1376,7 @@ public class TabLayout extends HorizontalScrollView {
 
                     @Override
                     public void onAnimationEnd(Animation animation) {
-                        mSelectedPosition = position;
+                        updateSelectedPosition(position);
                         mSelectionOffset = 0f;
                     }
 
@@ -1384,6 +1389,11 @@ public class TabLayout extends HorizontalScrollView {
             }
         }
 
+        private void updateSelectedPosition(int position) {
+            mSelectedPosition = position;
+            setSelectedIndicatorColor(colorForIndicatorAtPosition(position));
+        }
+
         @Override
         protected void onDraw(Canvas canvas) {
             // Thick colored underline below the current selection
@@ -1394,6 +1404,10 @@ public class TabLayout extends HorizontalScrollView {
         }
     }
 
+    private int colorForIndicatorAtPosition(int position) {
+        return (mTabStyleDelegate != null) ? mTabStyleDelegate.colorForIndicatorAtPosition(position) : mDefaultIndicatorColor;
+    }
+
     /**
      * Linear interpolation between {@code startValue} and {@code endValue} by the fraction {@code
      * fraction}.
@@ -1402,4 +1416,16 @@ public class TabLayout extends HorizontalScrollView {
         return startValue + (fraction * (endValue - startValue));
     }
 
+    static int lerpColor(int startColor, int endColor, float fraction) {
+
+        return Color.argb(
+                (int)lerp(Color.alpha(startColor), Color.alpha(endColor), fraction),
+                (int)lerp(Color.red(startColor), Color.red(endColor), fraction),
+                (int)lerp(Color.green(startColor), Color.green(endColor), fraction),
+                (int)lerp(Color.blue(startColor), Color.blue(endColor), fraction));
+    }
+
+    public interface TabStyleDelegate {
+        int colorForIndicatorAtPosition(int position);
+    }
 }
